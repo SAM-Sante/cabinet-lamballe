@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#F5F8FE">
+  <title>Mon programme d’exercices · SAM</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-cabinet-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="favicon-cabinet-192.png">
+  <link rel="apple-touch-icon" href="apple-touch-cabinet.png">
+  <!--
+    SAM Clinique — page relais patients.
+    Sur Android, l'appli Google Drive intercepte les adresses script.google.com et affiche
+    « Impossible d'ouvrir le fichier ». Les QR codes pointent donc ici (#p=…) : cette page
+    demande le programme à Apps Script et l'affiche elle-même. Elle ne stocke rien ;
+    le jeton reste dans la partie « # » de l'adresse, jamais envoyée à l'hébergeur.
+  -->
+  <style>
+    :root { --fond: #F5F8FE; --texte: #1B2A4A; --texte-2: #5A6A8A; --accent: #3F66C4; --primaire: #7FA3EA; --surface: #fff; --bordure: #DDE6F5; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--fond); color: var(--texte);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; padding: 24px 16px; }
+    .carte { max-width: 420px; width: 100%; background: var(--surface); border: 1px solid var(--bordure); border-radius: 14px;
+      padding: 28px 22px; text-align: center; box-shadow: 0 4px 14px rgba(27, 42, 74, .06); }
+    .sam { font-weight: 800; font-size: 28px; letter-spacing: .04em; color: #14275A; }
+    .devise { font-size: 14px; color: var(--texte-2); margin-bottom: 18px; }
+    .devise b { color: var(--accent); }
+    .roue { width: 34px; height: 34px; margin: 6px auto 12px; border-radius: 50%; border: 4px solid var(--bordure);
+      border-top-color: var(--accent); animation: tourne 0.9s linear infinite; }
+    @keyframes tourne { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .roue { animation-duration: 3s; } }
+    h1 { font-size: 19px; margin: 0 0 6px; }
+    p { margin: 0 0 12px; color: var(--texte-2); }
+    button { min-height: 44px; padding: 0 18px; border-radius: 9px; border: 0; background: var(--primaire); color: #0F2457;
+      font: 650 16px/1 inherit; cursor: pointer; }
+    .masque { display: none; }
+  </style>
+</head>
+<body>
+  <main class="carte" aria-live="polite">
+    <div class="sam">SAM</div>
+    <div class="devise"><b>S</b>anté <b>A</b>vec le <b>M</b>ouvement</div>
+    <div id="attente">
+      <div class="roue" aria-hidden="true"></div>
+      <p>Chargement de votre programme…</p>
+    </div>
+    <div id="erreur" class="masque">
+      <h1 id="erreur-titre">Connexion impossible</h1>
+      <p id="erreur-texte">Vérifiez votre connexion internet, puis réessayez.</p>
+      <button type="button" id="reessayer">Réessayer</button>
+    </div>
+  </main>
+  <script>
+  (function () {
+    'use strict';
+    // Adresse /exec du déploiement « Patients » (Paramètres › url_patients).
+    // ===== Réglages de cette page relais =====
+    // Adresse /exec du déploiement « Patients » (Paramètres › url_patients).
+    var API = 'https://script.google.com/macros/s/AKfycbyJv6RME0cWOqnQ2TNnNmIMm1w47Lgb9BjoQJsfq5QJtk2TE6sa0r48-IH2NMWKelh3/exec';
+    // Icônes de l'onglet (fichiers placés à côté de cette page)
+    var ICONES = { petite: 'favicon-cabinet-32.png', grande: 'favicon-cabinet-192.png', apple: 'apple-touch-cabinet.png' };
+    // =========================================
+    var VIEWPORT = '<meta name="viewport" content="width=device-width, initial-scale=1">'
+      + '<meta name="referrer" content="no-referrer"><title>Mon programme d’exercices · SAM</title>'
+      + '<link rel="icon" type="image/png" sizes="32x32" href="' + ICONES.petite + '">'
+      + '<link rel="icon" type="image/png" sizes="192x192" href="' + ICONES.grande + '">'
+      + '<link rel="apple-touch-icon" href="' + ICONES.apple + '">'
+      // Autre lien collé dans le même onglet : on recharge pour afficher l'autre programme.
+      + '<script>window.addEventListener("hashchange", function () { location.reload(); });<\/script>';
+
+    function $(id) { return document.getElementById(id); }
+    function erreur(titre, texte, reessai) {
+      $('attente').classList.add('masque');
+      $('erreur').classList.remove('masque');
+      $('erreur-titre').textContent = titre;
+      $('erreur-texte').textContent = texte;
+      $('reessayer').classList.toggle('masque', !reessai);
+    }
+    var m = /(?:^|[#&?])p=([A-Za-z0-9_.-]{10,4000})/.exec(location.hash) || /[?&]p=([A-Za-z0-9_.-]{10,4000})/.exec(location.search);
+    if (!m) {
+      erreur('Lien incomplet', 'Scannez à nouveau le QR code, ou demandez le lien à votre chiropracteur.', false);
+      return;
+    }
+    var jeton = m[1];
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]{10,}\/exec$/.test(API)) {
+      erreur('Page en cours d’installation', 'L’adresse du programme n’est pas encore réglée. Prévenez votre praticien.', false);
+      return;
+    }
+
+    window.addEventListener('hashchange', function () { location.reload(); });
+
+    function charger() {
+      $('erreur').classList.add('masque');
+      $('attente').classList.remove('masque');
+      var controle = window.AbortController ? new AbortController() : null;
+      var minuterie = setTimeout(function () { if (controle) controle.abort(); }, 30000);
+      fetch(API + '?api=page&p=' + encodeURIComponent(jeton), { signal: controle ? controle.signal : undefined, cache: 'no-store' })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function (d) {
+          clearTimeout(minuterie);
+          if (!d || typeof d.html !== 'string') throw new Error('Réponse inattendue');
+          var html = /<head[^>]*>/i.test(d.html) ? d.html.replace(/<head[^>]*>/i, function (t) { return t + VIEWPORT; }) : VIEWPORT + d.html;
+          document.open();
+          document.write(html);
+          document.close();
+        })
+        .catch(function () {
+          clearTimeout(minuterie);
+          erreur('Connexion impossible', 'Le programme n’a pas pu être chargé. Vérifiez votre connexion internet, puis réessayez.', true);
+        });
+    }
+    $('reessayer').addEventListener('click', charger);
+    charger();
+  })();
+  </script>
+</body>
+</html>
