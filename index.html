@@ -91,9 +91,23 @@
 
     window.addEventListener('hashchange', function () { location.reload(); });
 
-    function charger() {
-      $('erreur').classList.add('masque');
-      $('attente').classList.remove('masque');
+    // ----- Fiche gardée sur le téléphone : affichage immédiat, même sans réseau -----
+    // La dernière fiche reçue est enregistrée ici (5 programmes au plus). À l'ouverture suivante elle
+    // s'affiche tout de suite, puis la page vérifie en arrière-plan si le programme a changé.
+    var CLE = 'sam-fiche-' + jeton.split('.')[0].slice(0, 40);
+    function lireFiche() {
+      try { var v = JSON.parse(localStorage.getItem(CLE) || 'null'); return v && typeof v.html === 'string' ? v : null; } catch (e) { return null; }
+    }
+    function garderFiche(html) {
+      try {
+        var liste = JSON.parse(localStorage.getItem('sam-fiches') || '[]').filter(function (k) { return k !== CLE; });
+        liste.push(CLE);
+        while (liste.length > 5) localStorage.removeItem(liste.shift());
+        localStorage.setItem('sam-fiches', JSON.stringify(liste));
+        localStorage.setItem(CLE, JSON.stringify({ html: html, date: Date.now() }));
+      } catch (e) { /* stockage plein ou indisponible : la fiche sera rechargée à chaque fois */ }
+    }
+    function demander(suite, echec) {
       var controle = window.AbortController ? new AbortController() : null;
       var minuterie = setTimeout(function () { if (controle) controle.abort(); }, 30000);
       fetch(API + '?api=page&p=' + encodeURIComponent(jeton), { signal: controle ? controle.signal : undefined, cache: 'no-store' })
@@ -101,16 +115,67 @@
         .then(function (d) {
           clearTimeout(minuterie);
           if (!d || typeof d.html !== 'string') throw new Error('Réponse inattendue');
-          var html = /<head[^>]*>/i.test(d.html) ? d.html.replace(/<head[^>]*>/i, function (t) { return t + VIEWPORT; }) : VIEWPORT + d.html;
-          document.open();
-          document.write(html);
-          document.close();
+          suite(d.html);
         })
-        .catch(function () {
-          clearTimeout(minuterie);
-          erreur('Connexion impossible', 'Le programme n’a pas pu être chargé. Vérifiez votre connexion internet, puis réessayez.', true);
-        });
+        .catch(function () { clearTimeout(minuterie); echec(); });
     }
+    /** Exécutée DANS la fiche affichée depuis le téléphone : compare avec la version du serveur. */
+    function verifierEnFond(cfg) {
+      var essais = 0;
+      try { essais = Number(sessionStorage.getItem('sam-rechargements') || 0); } catch (e) { /* rien */ }
+      fetch(cfg.api + '?api=page&p=' + encodeURIComponent(cfg.jeton), { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d || typeof d.html !== 'string') return;
+          var garde = null;
+          try { garde = JSON.parse(localStorage.getItem(cfg.cle) || 'null'); } catch (e) { /* rien */ }
+          if (garde && garde.html === d.html) return; // à jour
+          try { localStorage.setItem(cfg.cle, JSON.stringify({ html: d.html, date: Date.now() })); } catch (e) { return; }
+          var recharger = function () {
+            try { sessionStorage.setItem('sam-rechargements', String(essais + 1)); } catch (e) { /* rien */ }
+            location.reload();
+          };
+          // Message (expiré, désactivé) à afficher ou à remplacer : tout de suite. Sinon on laisse le patient choisir.
+          if (!document.getElementById('page') || d.html.indexOf('id="page"') === -1) { if (essais < 3) recharger(); return; }
+          var bandeau = document.createElement('div');
+          bandeau.setAttribute('role', 'status');
+          bandeau.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:40;background:#1B2A4A;color:#fff;'
+            + 'border-radius:12px;padding:12px 14px;display:flex;gap:12px;align-items:center;justify-content:space-between;'
+            + 'font:15px/1.4 system-ui,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.25)';
+          var texte = document.createElement('span');
+          texte.textContent = 'Votre programme a été mis à jour.';
+          var bouton = document.createElement('button');
+          bouton.type = 'button'; bouton.textContent = 'Afficher';
+          bouton.style.cssText = 'border:0;border-radius:8px;padding:8px 14px;font:inherit;font-weight:700;background:#7FA3EA;color:#0F2457;cursor:pointer';
+          bouton.addEventListener('click', recharger);
+          bandeau.appendChild(texte); bandeau.appendChild(bouton);
+          document.body.appendChild(bandeau);
+        })
+        .catch(function () { /* hors connexion : la fiche gardée reste affichée */ });
+    }
+    function afficher(html, depuisTelephone) {
+      var ajout = VIEWPORT;
+      if (depuisTelephone) {
+        ajout += '<script>(' + verifierEnFond.toString() + ')(' + JSON.stringify({ api: API, jeton: jeton, cle: CLE }) + ');<\/script>';
+      }
+      var page = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, function (t) { return t + ajout; }) : ajout + html;
+      document.open();
+      document.write(page);
+      document.close();
+    }
+
+    function charger() {
+      $('erreur').classList.add('masque');
+      $('attente').classList.remove('masque');
+      demander(function (html) {
+        garderFiche(html);
+        afficher(html, false);
+      }, function () {
+        erreur('Connexion impossible', 'Le programme n’a pas pu être chargé. Vérifiez votre connexion internet, puis réessayez.', true);
+      });
+    }
+    var gardee = lireFiche();
+    if (gardee) { afficher(gardee.html, true); return; }
     $('reessayer').addEventListener('click', charger);
     charger();
   })();
